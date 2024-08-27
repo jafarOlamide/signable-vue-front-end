@@ -1,16 +1,24 @@
   
 <script setup>
-  import { ref, onMounted, onUnmounted } from 'vue';
+  import { ref, onMounted, onUnmounted, watch, nextTick, computed } from 'vue';
   import apiClient from '@/services/api-client';
   import echo from '@/packages/echo';
   
   const messages = ref([]);
   const user = JSON.parse(localStorage.getItem('user'));
+  const messagesContainer = ref(null);
+  const endOfMessages = ref(null);
+
+  const isCurrentUser = computed(() => {
+    return (messageUserId) => messageUserId === user.id;
+  });
 
   const fetchMessages = async() => {
     try {
     const response = await apiClient.get('/messages');
      messages.value = response.data;
+     await nextTick();
+     scrollToBottom();
 
     } catch (error) {
         console.error('Error', error);
@@ -23,22 +31,37 @@
         await apiClient.post('/messages', { message: formData.value})
         formData.value = ''
         } catch (error) {
-            console.error('Error submitting form:', error)
+            console.error('Error', error)
         }
   }
 
-  onMounted(() => {
-    fetchMessages();
+  const scrollToBottom = () => {
+    if (endOfMessages.value) {
+      endOfMessages.value.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+  };
 
-    echo.private(`chat.${user.id}`)
+  onMounted(async () => {
+    await fetchMessages();
+
+    scrollToBottom();
+    echo.private('generalchat')
       .listen('MessageSent', (e) => {
+        if (!messages.value.some(m => m.id === e.message.id)) {
         messages.value.push(e.message);
-        console.log(e)
-      });
+        nextTick(() => {
+          scrollToBottom();
+        });
+      }
+    });
   });
-  
+
+  watch(messages, () => {
+   scrollToBottom();
+  }, { deep: true });
+
   onUnmounted(() => {
-    echo.leaveChannel(`chat.${user.id}`);
+    echo.leaveChannel('generalchat');
   });
 </script>
 
@@ -61,18 +84,17 @@
           <h1 class="text-lg font-semibold">Team Chat</h1>
         </header>
   
-        <main class="flex-1 bg-gray-100 p-4 overflow-y-auto">
-
+        <main class="flex-1 bg-gray-100 p-4 overflow-y-auto" ref="messagesContainer">
           <ul class="space-y-4">
-            
             <li v-for="(message, index) in messages" :key="index">
                 <div class="bg-white p-4 rounded shadow">
-                  <div class="font-semibold">{{ message.sender.username}}</div>
+                  <div class="font-semibold">{{ isCurrentUser(message.sender_id) ? 'You' : message.sender.username }}</div>
                   <div class="text-gray-700">{{  message.message }}</div>
                   <div class="flex justify-end">{{  message.created_at }}</div>
                 </div>
             </li>
-        </ul>
+          </ul>
+          <div ref="endOfMessages"></div>
         </main>
   
         <footer class="bg-white p-4">
